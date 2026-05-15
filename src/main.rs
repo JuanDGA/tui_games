@@ -3,6 +3,7 @@ use std::panic;
 
 mod app;
 mod game;
+mod grid;
 mod menu;
 mod registry;
 

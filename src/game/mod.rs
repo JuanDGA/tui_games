@@ -10,6 +10,7 @@ pub trait Game {
     fn name(&self) -> &'static str;
     fn instructions(&self) -> &'static str;
     fn poll_timeout(&self) -> Duration;
+    fn grid_size(&self) -> (u16, u16);
 
     fn reset(&mut self);
     fn handle_event(&mut self, event: Event);
