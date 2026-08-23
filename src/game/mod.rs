@@ -4,6 +4,7 @@ use crossterm::event::Event;
 use ratatui::Frame;
 
 pub mod snake;
+pub mod tetris;
 
 pub trait Game {
     fn name(&self) -> &'static str;

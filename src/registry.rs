@@ -6,8 +6,14 @@ pub struct GameEntry {
 }
 
 pub fn entries() -> &'static [GameEntry] {
-    &[GameEntry {
-        name: "Snake",
-        factory: || Box::new(crate::game::snake::SnakeGame::new()),
-    }]
+    &[
+        GameEntry {
+            name: "Snake",
+            factory: || Box::new(crate::game::snake::SnakeGame::new()),
+        },
+        GameEntry {
+            name: "Tetris",
+            factory: || Box::new(crate::game::tetris::TetrisGame::new()),
+        },
+    ]
 }

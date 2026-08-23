@@ -18,8 +18,8 @@ From a local checkout, you can also install with `cargo install --path .`.
 
 ## Games
 
-- **Square Demo** — move a square with the arrow keys
 - **Snake** — classic snake; eat food and avoid hitting yourself
+- **Tetris** — clear lines with falling tetrominoes; ←→ move, ↑ rotate, ↓ soft drop, space hard drop
 
 ## Controls
 
