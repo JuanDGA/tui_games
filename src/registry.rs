@@ -14,5 +14,10 @@ pub fn entries() -> &'static [GameEntry] {
             instructions: "Arrow keys to move. X to end game.",
             factory: || Box::new(crate::game::demo::DemoGame::new()),
         },
+        GameEntry {
+            name: "Snake",
+            instructions: "Arrow keys to steer. Esc to pause.",
+            factory: || Box::new(crate::game::snake::SnakeGame::new()),
+        },
     ]
 }

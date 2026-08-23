@@ -4,6 +4,7 @@ use crossterm::event::Event;
 use ratatui::Frame;
 
 pub mod demo;
+pub mod snake;
 
 #[allow(dead_code)]
 pub trait Game {

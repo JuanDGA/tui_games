@@ -2,7 +2,15 @@
 name = "tui_games"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+description = "A collection of terminal games playable in your terminal."
+license = "MIT"
+readme = "README.md"
+keywords = ["tui", "games", "ratatui", "terminal", "snake"]
+categories = ["command-line-utilities", "games"]
+include = ["src/**/*", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
 
 [dependencies]
 crossterm = "0.29.0"
 ratatui = "0.30.0"
+rand = "0.8"
