@@ -3,15 +3,12 @@ use std::time::Duration;
 use crossterm::event::Event;
 use ratatui::Frame;
 
-pub mod demo;
 pub mod snake;
 
-#[allow(dead_code)]
 pub trait Game {
     fn name(&self) -> &'static str;
-    fn instructions(&self) -> &'static str;
     fn poll_timeout(&self) -> Duration;
-    fn grid_size(&self) -> (u16, u16);
+    fn min_size(&self) -> (u16, u16);
 
     fn reset(&mut self);
     fn handle_event(&mut self, event: Event);

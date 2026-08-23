@@ -2,6 +2,8 @@ use ratatui::{Frame, prelude::*, widgets::*};
 
 use crate::registry::GameEntry;
 
+pub const MIN_SIZE: (u16, u16) = (42, 8);
+
 pub fn render(frame: &mut Frame, registry: &[GameEntry], selected: usize) {
     let area = frame.area();
     let items: Vec<ListItem> = registry.iter().enumerate().map(|(i, entry)| {
