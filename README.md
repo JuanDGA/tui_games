@@ -20,13 +20,14 @@ From a local checkout, you can also install with `cargo install --path .`.
 
 - **Snake** — classic snake; eat food and avoid hitting yourself
 - **Tetris** — clear lines with falling tetrominoes; ←→ move, ↑ rotate, ↓ soft drop, space hard drop
-- **Pong** — hold W/S or ↑/↓ to move; first to 11 against the CPU
+- **Pong** — first to 11; choose vs CPU or vs Player. A uses W/S, B uses ↑/↓ (vs CPU, You get both)
 
 ## Controls
 
 | Context | Keys |
 | --- | --- |
 | Menu | ↑/↓ navigate, Enter select, Q quit |
+| Ready | controls on a pause-style overlay; Enter start, or C vs CPU / F vs Player; M or Esc menu |
 | In game | Esc pause (plus each game's own instructions) |
 | Paused | R resume, M main menu |
 | Game over | P play again, M main menu |

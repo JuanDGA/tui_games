@@ -4,7 +4,11 @@ use crossterm::event::{Event, KeyCode, KeyEventKind};
 use rand::Rng;
 use ratatui::{Frame, prelude::*, symbols::border, widgets::Block};
 
-use super::Game;
+use super::controls::letter;
+use super::{
+    Action, ActionPhase, Controller, Game, KeyMap, MatchConfig, MatchError, Multiplayer,
+    MultiplayerSpec, PlayerId, Seat,
+};
 use crate::grid::GridLayout;
 
 const COURT_COLS: u16 = 39;
@@ -19,45 +23,76 @@ const WIN_SCORE: u32 = 11;
 const SERVE_PAUSE: Duration = Duration::from_millis(700);
 const PHYSICS_STEP: f32 = 1.0 / 120.0;
 
+const LEFT: usize = 0;
+const RIGHT: usize = 1;
+const LEFT_ID: PlayerId = PlayerId::A;
+const RIGHT_ID: PlayerId = PlayerId::B;
+
+fn pong_key_map() -> KeyMap {
+    KeyMap::new()
+        .player_a(Action::UP, letter('w'))
+        .player_a(Action::DOWN, letter('s'))
+        .player_b(Action::UP, [KeyCode::Up])
+        .player_b(Action::DOWN, [KeyCode::Down])
+}
+
 const PLAYER_COLOR: Color = Color::LightCyan;
 const AI_COLOR: Color = Color::LightYellow;
 const BALL_COLOR: Color = Color::White;
 const NET_COLOR: Color = Color::DarkGray;
 
 #[derive(Debug)]
+struct Paddle {
+    y: f32,
+    up_held: bool,
+    down_held: bool,
+    controller: Controller,
+}
+
+#[derive(Debug)]
 pub struct PongGame {
-    player_y: f32,
-    ai_y: f32,
+    paddles: [Paddle; 2],
     ball_x: f32,
     ball_y: f32,
     ball_vx: f32,
     ball_vy: f32,
-    player_score: u32,
-    ai_score: u32,
-    up_held: bool,
-    down_held: bool,
+    scores: [u32; 2],
     serve_delay: Duration,
-    serve_toward_player: bool,
+    serve_toward_left: bool,
+    match_config: MatchConfig,
     game_over: bool,
 }
 
 impl PongGame {
     pub fn new() -> Self {
+        let spec = MultiplayerSpec::TWO_PLAYER;
+        let match_config = MatchConfig::vs_cpu(spec);
         let mut game = Self {
-            player_y: 0.0,
-            ai_y: 0.0,
+            paddles: [
+                Paddle {
+                    y: 0.0,
+                    up_held: false,
+                    down_held: false,
+                    controller: Controller::Human,
+                },
+                Paddle {
+                    y: 0.0,
+                    up_held: false,
+                    down_held: false,
+                    controller: Controller::Cpu,
+                },
+            ],
             ball_x: 0.0,
             ball_y: 0.0,
             ball_vx: 0.0,
             ball_vy: 0.0,
-            player_score: 0,
-            ai_score: 0,
-            up_held: false,
-            down_held: false,
+            scores: [0, 0],
             serve_delay: Duration::ZERO,
-            serve_toward_player: false,
+            serve_toward_left: false,
+            match_config,
             game_over: false,
         };
+        game.sync_controllers();
         game.reset();
         game
     }
@@ -68,8 +103,8 @@ impl PongGame {
 
     fn center_paddles(&mut self) {
         let y = (COURT_ROWS as f32 - PADDLE_LEN) / 2.0;
-        self.player_y = y;
-        self.ai_y = y;
+        self.paddles[LEFT].y = y;
+        self.paddles[RIGHT].y = y;
     }
 
     fn serve(&mut self) {
@@ -77,41 +112,87 @@ impl PongGame {
         self.ball_y = COURT_ROWS as f32 / 2.0 - 0.5;
         let mut rng = rand::thread_rng();
         let angle = rng.gen_range(-0.55f32..0.55);
-        let dir_x = if self.serve_toward_player { -1.0 } else { 1.0 };
+        let dir_x = if self.serve_toward_left { -1.0 } else { 1.0 };
         self.ball_vx = dir_x * BALL_SPEED * angle.cos();
         self.ball_vy = BALL_SPEED * angle.sin();
         self.serve_delay = SERVE_PAUSE;
     }
 
-    fn set_hold(&mut self, up: bool, held: bool) {
-        if up {
-            self.up_held = held;
-        } else {
-            self.down_held = held;
+    fn sync_controllers(&mut self) {
+        let seats: Vec<Seat> = self.match_config.seats().to_vec();
+        for seat in seats {
+            if let Some(paddle) = self.paddle_mut(seat.id) {
+                paddle.controller = seat.controller;
+                paddle.up_held = false;
+                paddle.down_held = false;
+            }
         }
     }
 
-    fn move_player(&mut self, dt: f32) {
+    fn paddle_index(id: PlayerId) -> Option<usize> {
+        match id {
+            LEFT_ID => Some(LEFT),
+            RIGHT_ID => Some(RIGHT),
+            _ => None,
+        }
+    }
+
+    fn paddle_mut(&mut self, id: PlayerId) -> Option<&mut Paddle> {
+        Self::paddle_index(id).map(|i| &mut self.paddles[i])
+    }
+
+    fn human_count(&self) -> usize {
+        self.paddles
+            .iter()
+            .filter(|paddle| paddle.controller == Controller::Human)
+            .count()
+    }
+
+    fn set_hold(&mut self, side: usize, up: bool, held: bool) {
+        let paddle = &mut self.paddles[side];
+        if up {
+            paddle.up_held = held;
+        } else {
+            paddle.down_held = held;
+        }
+    }
+
+    fn move_humans(&mut self, dt: f32) {
+        for paddle in &mut self.paddles {
+            if paddle.controller != Controller::Human {
+                continue;
+            }
+            Self::nudge_paddle(paddle, PADDLE_SPEED, dt);
+        }
+    }
+
+    fn nudge_paddle(paddle: &mut Paddle, speed: f32, dt: f32) {
         let mut dir = 0.0;
-        if self.up_held {
+        if paddle.up_held {
             dir -= 1.0;
         }
-        if self.down_held {
+        if paddle.down_held {
             dir += 1.0;
         }
-        self.player_y = (self.player_y + dir * PADDLE_SPEED * dt).clamp(0.0, Self::max_paddle_y());
+        paddle.y = (paddle.y + dir * speed * dt).clamp(0.0, Self::max_paddle_y());
     }
 
-    fn move_ai(&mut self, dt: f32) {
-        let paddle_center = self.ai_y + PADDLE_LEN / 2.0;
-        let target = if self.ball_vx > 0.0 {
+    fn steer_cpu(&mut self, side: usize, dt: f32) {
+        let going_toward = if side == LEFT {
+            self.ball_vx < 0.0
+        } else {
+            self.ball_vx > 0.0
+        };
+        let target = if going_toward {
             self.ball_y + 0.5
         } else {
             COURT_ROWS as f32 / 2.0
         };
+        let paddle = &mut self.paddles[side];
+        let paddle_center = paddle.y + PADDLE_LEN / 2.0;
         let max = AI_SPEED * dt;
         let delta = (target - paddle_center).clamp(-max, max);
-        self.ai_y = (self.ai_y + delta).clamp(0.0, Self::max_paddle_y());
+        paddle.y = (paddle.y + delta).clamp(0.0, Self::max_paddle_y());
     }
 
     fn step_physics(&mut self, dt: f32) {
@@ -126,19 +207,21 @@ impl PongGame {
             self.ball_vy = -self.ball_vy.abs();
         }
 
-        if self.ball_vx < 0.0 && self.overlaps_paddle(self.player_y, 0.0) {
+        if self.ball_vx < 0.0 && self.overlaps_paddle(self.paddles[LEFT].y, 0.0) {
             self.ball_x = 1.0;
-            self.bounce_off_paddle(self.player_y);
-        } else if self.ball_vx > 0.0 && self.overlaps_paddle(self.ai_y, (COURT_COLS - 1) as f32) {
+            self.bounce_off_paddle(self.paddles[LEFT].y);
+        } else if self.ball_vx > 0.0
+            && self.overlaps_paddle(self.paddles[RIGHT].y, (COURT_COLS - 1) as f32)
+        {
             self.ball_x = (COURT_COLS - 2) as f32;
-            self.bounce_off_paddle(self.ai_y);
+            self.bounce_off_paddle(self.paddles[RIGHT].y);
         }
 
         if self.ball_x + 1.0 < 0.0 {
-            self.ai_score += 1;
+            self.scores[RIGHT] += 1;
             self.after_point(true);
         } else if self.ball_x > COURT_COLS as f32 {
-            self.player_score += 1;
+            self.scores[LEFT] += 1;
             self.after_point(false);
         }
     }
@@ -168,18 +251,26 @@ impl PongGame {
         self.ball_vy *= inv;
     }
 
-    fn after_point(&mut self, toward_player: bool) {
-        if self.player_score >= WIN_SCORE || self.ai_score >= WIN_SCORE {
+    fn after_point(&mut self, toward_left: bool) {
+        if self.scores[LEFT] >= WIN_SCORE || self.scores[RIGHT] >= WIN_SCORE {
             self.game_over = true;
             return;
         }
-        self.serve_toward_player = toward_player;
+        self.serve_toward_left = toward_left;
         self.center_paddles();
         self.serve();
     }
 
     fn cell(pos: f32, max: u16) -> u16 {
         (pos.floor() as i32).clamp(0, max as i32 - 1) as u16
+    }
+
+    fn help_text(&self) -> &'static str {
+        match self.human_count() {
+            0 => " CPU vs CPU ",
+            1 => " W/S or ↑/↓ hold to move ",
+            _ => " W/S A   ↑/↓ B ",
+        }
     }
 }
 
@@ -197,12 +288,13 @@ impl Game for PongGame {
     }
 
     fn reset(&mut self) {
-        self.player_score = 0;
-        self.ai_score = 0;
-        self.up_held = false;
-        self.down_held = false;
+        self.scores = [0, 0];
+        for paddle in &mut self.paddles {
+            paddle.up_held = false;
+            paddle.down_held = false;
+        }
         self.game_over = false;
-        self.serve_toward_player = false;
+        self.serve_toward_left = false;
         self.center_paddles();
         self.serve();
     }
@@ -212,16 +304,43 @@ impl Game for PongGame {
             return;
         }
         let Event::Key(key) = event else { return };
-        let held = match key.kind {
-            KeyEventKind::Press | KeyEventKind::Repeat => true,
-            KeyEventKind::Release => false,
-        };
-
-        match key.code {
-            KeyCode::Char('w') | KeyCode::Char('W') | KeyCode::Up => self.set_hold(true, held),
-            KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Down => self.set_hold(false, held),
-            _ => {}
+        let phase = ActionPhase::from_key_kind(key.kind);
+        if let Some((player, action)) = self.controls().resolve(key.code, Some(&self.match_config))
+        {
+            self.handle_action(player, action, phase);
         }
+    }
+
+    fn controls(&self) -> KeyMap {
+        pong_key_map()
+    }
+
+    fn handle_action(&mut self, player: PlayerId, action: Action, phase: ActionPhase) {
+        if self.game_over {
+            return;
+        }
+        if self.match_config.controller(player) != Some(Controller::Human) {
+            return;
+        }
+        let Some(side) = Self::paddle_index(player) else {
+            return;
+        };
+        let up = if action == Action::UP {
+            true
+        } else if action == Action::DOWN {
+            false
+        } else {
+            return;
+        };
+        self.set_hold(side, up, phase.is_start());
+    }
+
+    fn is_multiplayer(&self) -> bool {
+        true
+    }
+
+    fn as_multiplayer(&mut self) -> Option<&mut dyn Multiplayer> {
+        Some(self)
     }
 
     fn update(&mut self, delta: Duration) {
@@ -230,8 +349,7 @@ impl Game for PongGame {
         }
 
         let dt = delta.as_secs_f32();
-        self.move_player(dt);
-        self.move_ai(dt);
+        self.move_humans(dt);
 
         if self.serve_delay > Duration::ZERO {
             self.serve_delay = self.serve_delay.saturating_sub(delta);
@@ -253,12 +371,16 @@ impl Game for PongGame {
             return;
         }
 
+        let two_human = self.human_count() > 1;
         let title = Line::from(format!(
-            " You {:>2}   Pong   {:>2} CPU ",
-            self.player_score, self.ai_score
+            " {} {:>2}   Pong   {:>2} {} ",
+            side_label(LEFT, self.paddles[LEFT].controller, two_human),
+            self.scores[LEFT],
+            self.scores[RIGHT],
+            side_label(RIGHT, self.paddles[RIGHT].controller, two_human),
         ))
         .bold();
-        let help = Line::from(" W/S or ↑/↓ hold to move ");
+        let help = Line::from(self.help_text());
         let block = Block::bordered()
             .title(title.centered())
             .title_bottom(help.centered())
@@ -275,8 +397,14 @@ impl Game for PongGame {
             );
         }
 
-        draw_paddle(frame, &grid, 0, self.player_y, PLAYER_COLOR);
-        draw_paddle(frame, &grid, COURT_COLS - 1, self.ai_y, AI_COLOR);
+        draw_paddle(frame, &grid, 0, self.paddles[LEFT].y, PLAYER_COLOR);
+        draw_paddle(
+            frame,
+            &grid,
+            COURT_COLS - 1,
+            self.paddles[RIGHT].y,
+            AI_COLOR,
+        );
         draw_ball(frame, &grid, self.ball_x, self.ball_y);
     }
 
@@ -285,7 +413,48 @@ impl Game for PongGame {
     }
 
     fn score(&self) -> u32 {
-        self.player_score
+        self.scores[LEFT]
+    }
+}
+
+impl Multiplayer for PongGame {
+    fn spec(&self) -> MultiplayerSpec {
+        MultiplayerSpec::TWO_PLAYER
+    }
+
+    fn match_config(&self) -> &MatchConfig {
+        &self.match_config
+    }
+
+    fn apply_match(&mut self, config: &MatchConfig) -> Result<(), MatchError> {
+        if config.player_count() != 2
+            || config.controller(LEFT_ID).is_none()
+            || config.controller(RIGHT_ID).is_none()
+        {
+            return Err(MatchError::WrongPlayers);
+        }
+        self.match_config = config.clone();
+        self.sync_controllers();
+        Ok(())
+    }
+
+    fn control_cpu(&mut self, player: PlayerId, delta: Duration) {
+        let Some(side) = Self::paddle_index(player) else {
+            return;
+        };
+        if self.paddles[side].controller != Controller::Cpu {
+            return;
+        }
+        self.steer_cpu(side, delta.as_secs_f32());
+    }
+}
+
+fn side_label(side: usize, controller: Controller, two_human: bool) -> &'static str {
+    match controller {
+        Controller::Cpu => "CPU",
+        Controller::Human if two_human && side == LEFT => "A",
+        Controller::Human if two_human => "B",
+        Controller::Human => "You",
     }
 }
 
@@ -427,19 +596,22 @@ mod tests {
     #[test]
     fn hold_moves_the_paddle_and_release_stops_it() {
         let mut game = parked();
-        let start = game.player_y;
+        let start = game.paddles[LEFT].y;
 
         game.handle_event(press(KeyCode::Up));
         game.update(Duration::from_millis(80));
-        assert!(game.player_y < start, "held up should move toward row 0");
+        assert!(
+            game.paddles[LEFT].y < start,
+            "held up should move toward row 0"
+        );
 
-        let mid = game.player_y;
+        let mid = game.paddles[LEFT].y;
         game.handle_event(release(KeyCode::Up));
         game.update(Duration::from_millis(200));
         assert!(
-            (game.player_y - mid).abs() < f32::EPSILON,
+            (game.paddles[LEFT].y - mid).abs() < f32::EPSILON,
             "release should freeze the paddle, got {} vs {}",
-            game.player_y,
+            game.paddles[LEFT].y,
             mid
         );
     }
@@ -450,40 +622,40 @@ mod tests {
         game.handle_event(press(KeyCode::Down));
         game.handle_event(press(KeyCode::Up));
         game.handle_event(release(KeyCode::Up));
-        let y = game.player_y;
+        let y = game.paddles[LEFT].y;
         game.update(Duration::from_millis(80));
-        assert!(game.player_y > y);
+        assert!(game.paddles[LEFT].y > y);
     }
 
     #[test]
     fn press_keeps_moving_through_the_key_repeat_delay() {
         let mut game = parked();
-        game.player_y = 0.0;
+        game.paddles[LEFT].y = 0.0;
         game.handle_event(press(KeyCode::Down));
         game.update(Duration::from_millis(80));
-        let early = game.player_y;
+        let early = game.paddles[LEFT].y;
         assert!((early - PADDLE_SPEED * 0.08).abs() < 0.001);
 
         // OS key-repeat often waits ~300-500ms after Press before Repeat.
         // Motion must not pause in that gap; Release is what stops the paddle.
         game.update(Duration::from_millis(400));
-        assert!((game.player_y - PADDLE_SPEED * 0.48).abs() < 0.001);
-        assert!(game.player_y > early);
+        assert!((game.paddles[LEFT].y - PADDLE_SPEED * 0.48).abs() < 0.001);
+        assert!(game.paddles[LEFT].y > early);
     }
 
     #[test]
     fn wasd_and_arrows_share_the_player_paddle() {
         let mut game = parked();
-        let start = game.player_y;
+        let start = game.paddles[LEFT].y;
         game.handle_event(press(KeyCode::Char('w')));
         game.update(Duration::from_millis(80));
-        assert!(game.player_y < start);
+        assert!(game.paddles[LEFT].y < start);
         game.handle_event(release(KeyCode::Char('w')));
 
-        let mid = game.player_y;
+        let mid = game.paddles[LEFT].y;
         game.handle_event(press(KeyCode::Char('s')));
         game.update(Duration::from_millis(80));
-        assert!(game.player_y > mid);
+        assert!(game.paddles[LEFT].y > mid);
         game.handle_event(release(KeyCode::Char('S')));
     }
 
@@ -504,28 +676,28 @@ mod tests {
     fn player_paddle_reflects_the_ball() {
         let mut game = parked();
         game.serve_delay = Duration::ZERO;
-        game.player_y = 6.0;
+        game.paddles[LEFT].y = 6.0;
         game.ball_x = 0.6;
         game.ball_y = 7.0;
         game.ball_vx = -18.0;
         game.ball_vy = 0.0;
         game.update(Duration::from_millis(40));
         assert!(game.ball_vx > 0.0);
-        assert_eq!(game.ai_score, 0);
-        assert_eq!(game.player_score, 0);
+        assert_eq!(game.scores[RIGHT], 0);
+        assert_eq!(game.scores[LEFT], 0);
     }
 
     #[test]
     fn missing_the_player_paddle_scores_for_cpu() {
         let mut game = parked();
         game.serve_delay = Duration::ZERO;
-        game.player_y = 0.0;
+        game.paddles[LEFT].y = 0.0;
         game.ball_x = -0.2;
         game.ball_y = 12.0;
         game.ball_vx = -20.0;
         game.ball_vy = 0.0;
         game.update(Duration::from_millis(50));
-        assert_eq!(game.ai_score, 1);
+        assert_eq!(game.scores[RIGHT], 1);
         assert!(game.serve_delay > Duration::ZERO);
         assert!(!game.game_over);
     }
@@ -533,15 +705,15 @@ mod tests {
     #[test]
     fn reaching_eleven_ends_the_match() {
         let mut game = parked();
-        game.player_score = 10;
+        game.scores[LEFT] = 10;
         game.serve_delay = Duration::ZERO;
-        game.ai_y = 0.0;
+        game.paddles[RIGHT].y = 0.0;
         game.ball_x = COURT_COLS as f32 + 0.2;
         game.ball_y = 12.0;
         game.ball_vx = 20.0;
         game.ball_vy = 0.0;
         game.update(Duration::from_millis(50));
-        assert_eq!(game.player_score, 11);
+        assert_eq!(game.scores[LEFT], 11);
         assert!(game.game_over);
         assert_eq!(game.score(), 11);
     }
@@ -549,12 +721,85 @@ mod tests {
     #[test]
     fn ai_tracks_a_ball_coming_toward_it() {
         let mut game = parked();
-        game.ai_y = 0.0;
+        game.paddles[RIGHT].y = 0.0;
         game.ball_x = 20.0;
         game.ball_y = 12.0;
         game.ball_vx = 10.0;
+        game.tick_cpus(Duration::from_millis(200));
         game.update(Duration::from_millis(200));
-        assert!(game.ai_y > 0.0);
+        assert!(game.paddles[RIGHT].y > 0.0);
+    }
+
+    #[test]
+    fn controls_map_actions_to_player_a_and_b() {
+        let game = PongGame::new();
+        let map = game.controls();
+        assert_eq!(
+            map.lookup(KeyCode::Char('w')),
+            Some((PlayerId::A, Action::UP))
+        );
+        assert_eq!(map.lookup(KeyCode::Down), Some((PlayerId::B, Action::DOWN)));
+        assert_eq!(map.summarize(PlayerId::A), "W/S");
+        assert_eq!(map.summarize(PlayerId::B), "↑/↓");
+    }
+
+    #[test]
+    fn new_game_defaults_to_human_versus_cpu() {
+        let game = PongGame::new();
+        assert!(game.match_config().has_cpu());
+        assert_eq!(
+            game.match_config().controller(LEFT_ID),
+            Some(Controller::Human)
+        );
+        assert_eq!(
+            game.match_config().controller(RIGHT_ID),
+            Some(Controller::Cpu)
+        );
+    }
+
+    #[test]
+    fn two_humans_split_wasd_and_arrows() {
+        let mut game = parked();
+        let config = MatchConfig::new(
+            MultiplayerSpec::TWO_PLAYER,
+            vec![Seat::human(0), Seat::human(1)],
+        )
+        .unwrap();
+        game.apply_match(&config).unwrap();
+
+        let left = game.paddles[LEFT].y;
+        let right = game.paddles[RIGHT].y;
+        game.handle_event(press(KeyCode::Char('w')));
+        game.update(Duration::from_millis(80));
+        assert!(game.paddles[LEFT].y < left);
+        assert!((game.paddles[RIGHT].y - right).abs() < f32::EPSILON);
+
+        game.handle_event(release(KeyCode::Char('w')));
+        let left = game.paddles[LEFT].y;
+        let right = game.paddles[RIGHT].y;
+        game.handle_event(press(KeyCode::Up));
+        game.update(Duration::from_millis(80));
+        assert!((game.paddles[LEFT].y - left).abs() < f32::EPSILON);
+        assert!(game.paddles[RIGHT].y < right);
+    }
+
+    #[test]
+    fn apply_match_rejects_unknown_seat_ids() {
+        let mut game = PongGame::new();
+        let config = MatchConfig::new(
+            MultiplayerSpec::TWO_PLAYER,
+            vec![Seat::human(0), Seat::cpu(2)],
+        )
+        .unwrap();
+        assert_eq!(game.apply_match(&config), Err(MatchError::WrongPlayers));
+    }
+
+    #[test]
+    fn control_cpu_does_not_move_a_human_seat() {
+        let mut game = parked();
+        game.paddles[LEFT].y = 0.0;
+        game.control_cpu(LEFT_ID, Duration::from_millis(200));
+        assert_eq!(game.paddles[LEFT].y, 0.0);
     }
 
     #[test]
@@ -576,8 +821,8 @@ mod tests {
         let backend = TestBackend::new(w, h);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut game = PongGame::new();
-        game.player_score = 4;
-        game.ai_score = 7;
+        game.scores[LEFT] = 4;
+        game.scores[RIGHT] = 7;
         terminal.draw(|frame| game.render(frame)).unwrap();
 
         let buf = terminal.backend().buffer();
