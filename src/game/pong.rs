@@ -277,13 +277,7 @@ impl Game for PongGame {
 
         draw_paddle(frame, &grid, 0, self.player_y, PLAYER_COLOR);
         draw_paddle(frame, &grid, COURT_COLS - 1, self.ai_y, AI_COLOR);
-        draw_ball(
-            frame,
-            grid.cell_rect(
-                PongGame::cell(self.ball_x, COURT_COLS),
-                PongGame::cell(self.ball_y, COURT_ROWS),
-            ),
-        );
+        draw_ball(frame, &grid, self.ball_x, self.ball_y);
     }
 
     fn is_game_over(&self) -> bool {
@@ -320,38 +314,79 @@ fn fill_cell(frame: &mut Frame, cell: Rect, symbol: &str, style: Style) {
     }
 }
 
-fn draw_ball(frame: &mut Frame, cell: Rect) {
-    let cell = cell.intersection(frame.area());
-    if cell.width == 0 || cell.height == 0 {
+/// 2x2 quadrant glyphs. Bits: UL=1 UR=2 LL=4 LR=8.
+const QUAD_GLYPHS: [&str; 16] = [
+    " ", "▘", "▝", "▀", "▖", "▌", "▞", "▛", "▗", "▚", "▐", "▜", "▄", "▙", "▟", "█",
+];
+
+fn draw_ball(frame: &mut Frame, grid: &GridLayout, ball_x: f32, ball_y: f32) {
+    let used = grid.used_rect().intersection(frame.area());
+    if used.width == 0 || used.height == 0 {
+        return;
+    }
+    let cell_w = used.width as f32 / COURT_COLS as f32;
+    let cell_h = used.height as f32 / COURT_ROWS as f32;
+    let cx = used.x as f32 + (ball_x + 0.5) * cell_w;
+    let cy = used.y as f32 + (ball_y + 0.5) * cell_h;
+    paint_disk(
+        frame,
+        used,
+        cx,
+        cy,
+        (cell_w * 0.5).max(0.55),
+        (cell_h * 0.5).max(0.55),
+    );
+}
+
+fn paint_disk(frame: &mut Frame, clip: Rect, cx: f32, cy: f32, rx: f32, ry: f32) {
+    let clip = clip.intersection(frame.area());
+    if clip.width == 0 || clip.height == 0 {
         return;
     }
 
-    let style = Style::default().fg(BALL_COLOR);
-    // One glyph is rounder than a 1-row block. Larger cells get a filled disk.
-    if cell.height == 1 || cell.width <= 2 {
-        let x = cell.x + (cell.width.saturating_sub(1)) / 2;
-        frame.buffer_mut()[(x, cell.y)]
-            .set_symbol("●")
-            .set_style(style);
-        return;
-    }
+    let x0 = ((cx - rx).floor() as i32).clamp(clip.x as i32, clip.right() as i32);
+    let x1 = ((cx + rx).ceil() as i32).clamp(clip.x as i32, clip.right() as i32);
+    let y0 = ((cy - ry).floor() as i32).clamp(clip.y as i32, clip.bottom() as i32);
+    let y1 = ((cy + ry).ceil() as i32).clamp(clip.y as i32, clip.bottom() as i32);
 
-    let cx = cell.width as f32 / 2.0;
-    let cy = cell.height as f32 / 2.0;
-    let rx = cx.max(0.5);
-    let ry = cy.max(0.5);
-    let fill = Style::default().fg(BALL_COLOR).bg(BALL_COLOR);
-    for dy in 0..cell.height {
-        for dx in 0..cell.width {
-            let nx = (dx as f32 + 0.5 - cx) / rx;
-            let ny = (dy as f32 + 0.5 - cy) / ry;
-            if nx * nx + ny * ny <= 1.0 {
-                frame.buffer_mut()[(cell.x + dx, cell.y + dy)]
-                    .set_symbol("█")
-                    .set_style(fill);
+    let mut hits: Vec<(u16, u16, u8)> = Vec::new();
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let mut mask = 0u8;
+            for (bit, (ox, oy)) in [
+                (1u8, (0.25, 0.25)),
+                (2, (0.75, 0.25)),
+                (4, (0.25, 0.75)),
+                (8, (0.75, 0.75)),
+            ] {
+                if inside_ellipse(x as f32 + ox, y as f32 + oy, cx, cy, rx, ry) {
+                    mask |= bit;
+                }
+            }
+            if mask != 0 {
+                hits.push((x as u16, y as u16, mask));
             }
         }
     }
+
+    let style = Style::default().fg(BALL_COLOR);
+    let single_round = hits.len() == 1 && hits[0].2 == 15;
+    for (x, y, mask) in hits {
+        let glyph = if single_round {
+            "●"
+        } else {
+            QUAD_GLYPHS[mask as usize]
+        };
+        frame.buffer_mut()[(x, y)]
+            .set_symbol(glyph)
+            .set_style(style);
+    }
+}
+
+fn inside_ellipse(px: f32, py: f32, cx: f32, cy: f32, rx: f32, ry: f32) -> bool {
+    let nx = (px - cx) / rx;
+    let ny = (py - cy) / ry;
+    nx * nx + ny * ny <= 1.0
 }
 
 #[cfg(test)]
@@ -555,7 +590,10 @@ mod tests {
         assert!(text.contains("4"), "{text}");
         assert!(text.contains("7"), "{text}");
         assert!(text.contains("Pong"), "{text}");
-        assert!(text.contains('●'), "{text}");
+        assert!(
+            text.contains('●') || text.contains('█') || text.contains('▄') || text.contains('▀'),
+            "{text}"
+        );
     }
 
     #[test]
@@ -564,15 +602,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {
-                draw_ball(
-                    frame,
-                    Rect {
-                        x: 0,
-                        y: 0,
-                        width: 8,
-                        height: 4,
-                    },
-                );
+                paint_disk(frame, frame.area(), 4.0, 2.0, 3.0, 1.5);
             })
             .unwrap();
         let buf = terminal.backend().buffer();
@@ -580,5 +610,31 @@ mod tests {
         let center = buf[(4, 2)].symbol();
         assert_ne!(corner, "█", "circle should leave the cell corners empty");
         assert_eq!(center, "█");
+    }
+
+    #[test]
+    fn fractional_row_uses_half_blocks_instead_of_jumping() {
+        let backend = TestBackend::new(6, 4);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                // Centered on the boundary between rows 1 and 2.
+                paint_disk(frame, frame.area(), 3.0, 2.0, 1.2, 0.7);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let mut glyphs = String::new();
+        for y in 0..4 {
+            for x in 0..6 {
+                glyphs.push_str(buf[(x, y)].symbol());
+            }
+        }
+        assert!(
+            glyphs.contains('▄')
+                || glyphs.contains('▀')
+                || glyphs.contains('▌')
+                || glyphs.contains('▐'),
+            "expected a straddling half-block, got {glyphs:?}"
+        );
     }
 }
