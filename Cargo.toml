@@ -9,8 +9,14 @@ readme = "README.md"
 keywords = ["tui", "games", "snake", "tetris", "pong"]
 categories = ["command-line-utilities", "games"]
 include = ["src/**/*", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
+repository = "https://github.com/JuanDGA/tui_games"
 
 [dependencies]
 crossterm = "0.29.0"
 ratatui = "0.30.0"
 rand = "0.8"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
