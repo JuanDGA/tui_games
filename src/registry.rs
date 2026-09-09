@@ -19,6 +19,10 @@ pub fn entries() -> &'static [GameEntry] {
             name: "Pong",
             factory: || Box::new(crate::game::pong::PongGame::new()),
         },
+        GameEntry {
+            name: "Arkanoid",
+            factory: || Box::new(crate::game::arkanoid::ArkanoidGame::new()),
+        },
     ]
 }
 
@@ -59,8 +63,8 @@ mod tests {
     }
 
     #[test]
-    fn snake_and_tetris_are_single_player() {
-        for name in ["Snake", "Tetris"] {
+    fn snake_tetris_and_arkanoid_are_single_player() {
+        for name in ["Snake", "Tetris", "Arkanoid"] {
             let entry = entries().iter().find(|e| e.name == name).unwrap();
             let mut game = (entry.factory)();
             assert!(
