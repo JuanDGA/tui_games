@@ -15,5 +15,9 @@ pub fn entries() -> &'static [GameEntry] {
             name: "Tetris",
             factory: || Box::new(crate::game::tetris::TetrisGame::new()),
         },
+        GameEntry {
+            name: "Pong",
+            factory: || Box::new(crate::game::pong::PongGame::new()),
+        },
     ]
 }
