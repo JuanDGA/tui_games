@@ -1,12 +1,13 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use crossterm::event::{Event, KeyCode, KeyEventKind};
+use crossterm::event::{Event, KeyCode};
 use rand::Rng;
 use ratatui::{Frame, prelude::*, symbols::border, widgets::Block};
 
+use super::controls::letter;
+use super::{Action, ActionPhase, Game, KeyMap, PlayerId};
 use crate::grid::GridLayout;
-use super::Game;
 
 const GRID_COLS: u16 = 20;
 const GRID_ROWS: u16 = 20;
@@ -187,16 +188,33 @@ impl Game for SnakeGame {
 
     fn handle_event(&mut self, event: Event) {
         let Event::Key(key) = event else { return };
-        if key.kind != KeyEventKind::Press {
+        if !crate::kitty::is_action(key.kind) {
             return;
         }
+        if let Some((player, action)) = self.controls().lookup(key.code) {
+            self.handle_action(player, action, ActionPhase::Start);
+        }
+    }
 
-        match key.code {
-            KeyCode::Up => self.next_direction = Direction::Up,
-            KeyCode::Down => self.next_direction = Direction::Down,
-            KeyCode::Left => self.next_direction = Direction::Left,
-            KeyCode::Right => self.next_direction = Direction::Right,
-            KeyCode::Char('x') | KeyCode::Char('X') => self.game_over = true,
+    fn controls(&self) -> KeyMap {
+        KeyMap::new()
+            .player_a(Action::UP, [KeyCode::Up])
+            .player_a(Action::DOWN, [KeyCode::Down])
+            .player_a(Action::LEFT, [KeyCode::Left])
+            .player_a(Action::RIGHT, [KeyCode::Right])
+            .player_a(Action::END, letter('x'))
+    }
+
+    fn handle_action(&mut self, _player: PlayerId, action: Action, phase: ActionPhase) {
+        if !phase.is_start() {
+            return;
+        }
+        match action {
+            Action::UP => self.next_direction = Direction::Up,
+            Action::DOWN => self.next_direction = Direction::Down,
+            Action::LEFT => self.next_direction = Direction::Left,
+            Action::RIGHT => self.next_direction = Direction::Right,
+            Action::END => self.game_over = true,
             _ => {}
         }
     }
@@ -451,6 +469,22 @@ mod tests {
         ))
     }
 
+    fn repeat(code: KeyCode) -> Event {
+        Event::Key(crossterm::event::KeyEvent::new_with_kind(
+            code,
+            crossterm::event::KeyModifiers::NONE,
+            crossterm::event::KeyEventKind::Repeat,
+        ))
+    }
+
+    fn release(code: KeyCode) -> Event {
+        Event::Key(crossterm::event::KeyEvent::new_with_kind(
+            code,
+            crossterm::event::KeyModifiers::NONE,
+            crossterm::event::KeyEventKind::Release,
+        ))
+    }
+
     #[test]
     fn queued_turn_applies_on_the_next_tick() {
         let mut game = SnakeGame::new();
@@ -468,6 +502,18 @@ mod tests {
                 row: head.row - 1
             })
         );
+    }
+
+    #[test]
+    fn kitty_repeat_turns_and_release_does_not() {
+        let mut game = SnakeGame::new();
+        park_food(&mut game);
+
+        game.handle_event(repeat(KeyCode::Up));
+        assert_eq!(game.next_direction, Direction::Up);
+
+        game.handle_event(release(KeyCode::Down));
+        assert_eq!(game.next_direction, Direction::Up);
     }
 
     #[test]

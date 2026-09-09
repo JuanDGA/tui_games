@@ -1,15 +1,16 @@
 use std::time::Duration;
 
-use crossterm::event::{Event, KeyCode, KeyEventKind};
+use crossterm::event::{Event, KeyCode};
 use rand::seq::SliceRandom;
 use ratatui::{
+    Frame,
     prelude::*,
     symbols::border,
     widgets::{Block, Paragraph},
-    Frame,
 };
 
-use super::Game;
+use super::controls::letter;
+use super::{Action, ActionPhase, Game, KeyMap, PlayerId};
 use crate::grid::GridLayout;
 
 const BOARD_COLS: usize = 10;
@@ -469,21 +470,46 @@ impl Game for TetrisGame {
             return;
         }
         let Event::Key(key) = event else { return };
-        if key.kind != KeyEventKind::Press {
+        if !crate::kitty::is_action(key.kind) {
             return;
         }
+        if let Some((player, action)) = self.controls().lookup(key.code) {
+            self.handle_action(player, action, ActionPhase::Start);
+        }
+    }
 
-        match key.code {
-            KeyCode::Left => {
+    fn controls(&self) -> KeyMap {
+        KeyMap::new()
+            .player_a(Action::LEFT, [KeyCode::Left])
+            .player_a(Action::RIGHT, [KeyCode::Right])
+            .player_a(Action::SOFT_DROP, [KeyCode::Down])
+            .player_a(
+                Action::ROTATE,
+                [KeyCode::Up, KeyCode::Char('x'), KeyCode::Char('X')],
+            )
+            .player_a(Action::ROTATE_CCW, letter('z'))
+            .player_a(Action::HARD_DROP, [KeyCode::Char(' ')])
+    }
+
+    fn handle_action(&mut self, _player: PlayerId, action: Action, phase: ActionPhase) {
+        if self.game_over || !phase.is_start() {
+            return;
+        }
+        match action {
+            Action::LEFT => {
                 self.try_move(-1, 0);
             }
-            KeyCode::Right => {
+            Action::RIGHT => {
                 self.try_move(1, 0);
             }
-            KeyCode::Down => self.soft_drop(),
-            KeyCode::Up | KeyCode::Char('x') | KeyCode::Char('X') => self.try_rotate(1),
-            KeyCode::Char('z') | KeyCode::Char('Z') => self.try_rotate(-1),
-            KeyCode::Char(' ') => self.hard_drop(),
+            Action::SOFT_DROP => self.soft_drop(),
+            Action::ROTATE => {
+                self.try_rotate(1);
+            }
+            Action::ROTATE_CCW => {
+                self.try_rotate(-1);
+            }
+            Action::HARD_DROP => self.hard_drop(),
             _ => {}
         }
     }
