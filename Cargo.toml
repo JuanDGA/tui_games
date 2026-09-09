@@ -1,6 +1,6 @@
 [package]
 name = "tui_games"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "A collection of terminal games playable in your terminal."
