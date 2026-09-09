@@ -3,6 +3,7 @@ use std::time::Duration;
 use crossterm::event::Event;
 use ratatui::Frame;
 
+pub mod pong;
 pub mod snake;
 pub mod tetris;
 

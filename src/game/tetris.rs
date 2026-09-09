@@ -1,12 +1,12 @@
 use std::time::Duration;
 
-use crossterm::event::{Event, KeyCode, KeyEventKind};
+use crossterm::event::{Event, KeyCode};
 use rand::seq::SliceRandom;
 use ratatui::{
+    Frame,
     prelude::*,
     symbols::border,
     widgets::{Block, Paragraph},
-    Frame,
 };
 
 use super::Game;
@@ -469,7 +469,7 @@ impl Game for TetrisGame {
             return;
         }
         let Event::Key(key) = event else { return };
-        if key.kind != KeyEventKind::Press {
+        if !crate::kitty::is_action(key.kind) {
             return;
         }
 

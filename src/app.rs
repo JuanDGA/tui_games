@@ -16,7 +16,9 @@ pub struct App {
 }
 
 enum AppState {
-    MainMenu { selected: usize },
+    MainMenu {
+        selected: usize,
+    },
     Playing {
         game: Box<dyn Game>,
         substate: PlaySubstate,
@@ -124,13 +126,13 @@ impl App {
             return Ok(());
         }
 
-        let Event::Key(key) = event else { return Ok(()) };
-        if key.kind != KeyEventKind::Press {
+        let Event::Key(key) = event else {
             return Ok(());
-        }
+        };
+        let action = crate::kitty::is_action(key.kind);
 
         if self.is_too_small() {
-            if matches!(key.code, KeyCode::Char('q') | KeyCode::Char('Q')) {
+            if action && matches!(key.code, KeyCode::Char('q') | KeyCode::Char('Q')) {
                 self.exit = true;
             }
             return Ok(());
@@ -140,6 +142,9 @@ impl App {
 
         match &mut self.state {
             AppState::MainMenu { selected } => {
+                if !action {
+                    return Ok(());
+                }
                 let max = registry::entries().len().saturating_sub(1);
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Char('Q') => self.exit = true,
@@ -149,38 +154,49 @@ impl App {
                     _ => {}
                 }
             }
-            AppState::Playing { game, substate } => {
-                match key.code {
-                    KeyCode::Esc if *substate == PlaySubstate::Running => {
+            AppState::Playing { game, substate } => match *substate {
+                PlaySubstate::Running => {
+                    if action && key.code == KeyCode::Esc {
                         *substate = PlaySubstate::Paused;
+                    } else {
+                        game.handle_event(event);
                     }
-                    KeyCode::Esc if *substate == PlaySubstate::Paused => {
-                        *substate = PlaySubstate::Running;
-                    }
-                    _ => match substate {
-                        PlaySubstate::Running => game.handle_event(event),
-                        PlaySubstate::Paused => match key.code {
-                            KeyCode::Char('r') | KeyCode::Char('R') => {
-                                *substate = PlaySubstate::Running;
-                            }
-                            KeyCode::Char('m') | KeyCode::Char('M') => {
-                                transition = Some(Transition::ReturnToMenu);
-                            }
-                            _ => {}
-                        },
-                        PlaySubstate::GameOver => match key.code {
-                            KeyCode::Char('p') | KeyCode::Char('P') => {
-                                game.reset();
-                                *substate = PlaySubstate::Running;
-                            }
-                            KeyCode::Char('m') | KeyCode::Char('M') => {
-                                transition = Some(Transition::ReturnToMenu);
-                            }
-                            _ => {}
-                        },
-                    },
                 }
-            }
+                PlaySubstate::Paused => {
+                    // Forward releases so hold-to-move games can stop paddles
+                    // even if the key is lifted while the pause overlay is up.
+                    if key.kind == KeyEventKind::Release {
+                        game.handle_event(event);
+                    }
+                    if !action {
+                        return Ok(());
+                    }
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Char('r') | KeyCode::Char('R') => {
+                            *substate = PlaySubstate::Running;
+                        }
+                        KeyCode::Char('m') | KeyCode::Char('M') => {
+                            transition = Some(Transition::ReturnToMenu);
+                        }
+                        _ => {}
+                    }
+                }
+                PlaySubstate::GameOver => {
+                    if !action {
+                        return Ok(());
+                    }
+                    match key.code {
+                        KeyCode::Char('p') | KeyCode::Char('P') => {
+                            game.reset();
+                            *substate = PlaySubstate::Running;
+                        }
+                        KeyCode::Char('m') | KeyCode::Char('M') => {
+                            transition = Some(Transition::ReturnToMenu);
+                        }
+                        _ => {}
+                    }
+                }
+            },
         }
 
         match transition {
@@ -280,7 +296,9 @@ fn render_pause_overlay(frame: &mut Frame) {
     ]);
     frame.render_widget(Clear, area);
     frame.render_widget(
-        Paragraph::new(text).alignment(Alignment::Center).block(block),
+        Paragraph::new(text)
+            .alignment(Alignment::Center)
+            .block(block),
         area,
     );
 }
@@ -298,7 +316,9 @@ fn render_game_over_overlay(frame: &mut Frame, score: u32) {
     ]);
     frame.render_widget(Clear, area);
     frame.render_widget(
-        Paragraph::new(text).alignment(Alignment::Center).block(block),
+        Paragraph::new(text)
+            .alignment(Alignment::Center)
+            .block(block),
         area,
     );
 }
@@ -346,6 +366,17 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = App::new();
         app.launch_game(1);
+        app.term_width = 172;
+        app.term_height = 8;
+        terminal.draw(|frame| app.render(frame)).unwrap();
+    }
+
+    #[test]
+    fn too_small_pong_does_not_panic() {
+        let backend = TestBackend::new(172, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.launch_game(2);
         app.term_width = 172;
         app.term_height = 8;
         terminal.draw(|frame| app.render(frame)).unwrap();

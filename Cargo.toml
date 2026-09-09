@@ -6,7 +6,7 @@ rust-version = "1.85"
 description = "A collection of terminal games playable in your terminal."
 license = "MIT"
 readme = "README.md"
-keywords = ["tui", "games", "snake", "tetris"]
+keywords = ["tui", "games", "snake", "tetris", "pong"]
 categories = ["command-line-utilities", "games"]
 include = ["src/**/*", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
 
