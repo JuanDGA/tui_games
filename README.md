@@ -4,8 +4,30 @@ A collection of terminal games playable in your terminal.
 
 ## Install
 
+Prebuilt binaries (no Rust required):
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/JuanDGA/tui_games/releases/latest/download/tui_games-installer.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/JuanDGA/tui_games/releases/latest/download/tui_games-installer.ps1 | iex"
+```
+
+The installer puts `tui_games` in `~/.cargo/bin` (or `%USERPROFILE%\.cargo\bin` on Windows). If that directory is not on your `PATH`, the script will tell you how to add it. It also installs `tui_games-update` for later upgrades.
+
+From crates.io, if you have Rust:
+
 ```bash
 cargo install tui_games
+```
+
+From a local checkout:
+
+```bash
+cargo install --path .
 ```
 
 Then run:
@@ -13,8 +35,6 @@ Then run:
 ```bash
 tui_games
 ```
-
-From a local checkout, you can also install with `cargo install --path .`.
 
 ## Games
 
