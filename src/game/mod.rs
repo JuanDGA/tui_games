@@ -3,6 +3,7 @@ use std::time::Duration;
 use crossterm::event::Event;
 use ratatui::Frame;
 
+pub mod arkanoid;
 pub mod controls;
 pub mod multiplayer;
 pub mod pong;

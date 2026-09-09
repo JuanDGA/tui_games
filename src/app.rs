@@ -514,6 +514,17 @@ mod tests {
         terminal.draw(|frame| app.render(frame)).unwrap();
     }
 
+    #[test]
+    fn too_small_arkanoid_does_not_panic() {
+        let backend = TestBackend::new(172, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.launch_game(3);
+        app.term_width = 172;
+        app.term_height = 8;
+        terminal.draw(|frame| app.render(frame)).unwrap();
+    }
+
     fn buffer_text(backend: &TestBackend) -> String {
         let buf = backend.buffer();
         let mut out = String::new();
